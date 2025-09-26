@@ -1,0 +1,43 @@
+* {
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.main {
+    width: 100vw;
+    height: 100vh;
+}
+
+.meiota {
+   background-color: rgb(255, 255, 255);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 80%;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#cifra  {
+    width: 250px;
+}
+
+.pe {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    background-color: rgb(255, 255, 255);
+    width: 100%;
+    height: 20%;
+    box-sizing: border-box;
+}
+
+#spgreen, #valid {
+    width: 130px;
+}
+
+.main {
+    padding: 10px;
+}
