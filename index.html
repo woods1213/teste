@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Academias Perto de Mim — Demo</title>
+  <style>
+    :root{--card-w:220px;--gap:16px;--accent:#0b84ff}
+    body{font-family:Inter,system-ui,Segoe UI,Arial;margin:0;background:#f6f8fa;color:#0f1720}
+    header{padding:20px 24px;border-bottom:1px solid #e6e9ee;display:flex;align-items:center;justify-content:space-between}
+    header h1{margin:0;font-size:18px}
+    .container{padding:20px}
+
+    /* Row of cards */
+    .nearby-row{display:flex;gap:var(--gap);overflow-x:auto;padding:12px 8px;scroll-snap-type:x mandatory}
+    .nearby-row::-webkit-scrollbar{height:10px}
+    .nearby-row::-webkit-scrollbar-thumb{background:#d0d6df;border-radius:999px}
+
+    .card{flex:0 0 var(--card-w);background:white;border-radius:12px;padding:10px;box-shadow:0 6px 18px rgba(15,23,32,.06);display:flex;gap:10px;align-items:center;scroll-snap-align:center}
+    .logo{width:64px;height:64px;border-radius:12px;background:linear-gradient(135deg,#eef6ff,#fff);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);font-size:20px}
+    .meta{flex:1}
+    .name{font-weight:600;margin-bottom:6px}
+    .distance{font-size:13px;color:#556170}
+
+    /* small helpers */
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:var(--accent);color:white;border:0;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .muted{color:#6b7280;font-size:14px}
+
+    /* responsive */
+    @media(min-width:900px){:root{--card-w:260px}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Academias perto de você</h1>
+    <div class="controls">
+      <div class="muted" id="loc-info">Detectando localização...</div>
+      <button id="refresh">Atualizar</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <p class="muted">Role para ver academias nas proximidades (dados via OpenStreetMap / Overpass API). Se o navegador não permitir localização, usaremos Jacareí, SP como fallback.</p>
+
+    <section>
+      <div class="nearby-row" id="gyms-row">
+        <!-- cards serão injetados aqui -->
+      </div>
+    </section>
+  </main>
+
+  <script>
+  // ----- Configurações -----
+  const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+  // raio em metros para buscar academias
+  const SEARCH_RADIUS = 5000;
+
+  // fallback para Jacareí, SP (detectado automaticamente pelo servidor quando possível)
+  const FALLBACK = {lat: -23.3053, lon: -45.9658};
+
+  // util: haversine para distância em metros
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000; // m
+    const toRad = v => v * Math.PI/180;
+    const dLat = toRad(lat2-lat1);
+    const dLon = toRad(lon2-lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R*c;
+  }
+
+  // monta query Overpass QL para nodes/ways/relations próximos com tags de gym/fitness
+  function buildOverpassQuery(lat, lon, radius){
+    return `
+[out:json][timeout:25];
+(
+  node(around:${radius},${lat},${lon})[leisure=fitness_centre];
+  node(around:${radius},${lat},${lon})[amenity=gym];
+  node(around:${radius},${lat},${lon})["sport"~"fitness|gym|health"]; 
+  way(around:${radius},${lat},${lon})[leisure=fitness_centre];
+  way(around:${radius},${lat},${lon})[amenity=gym];
+  relation(around:${radius},${lat},${lon})[leisure=fitness_centre];
+);
+out center meta;`;
+  }
+
+  async function fetchGyms(lat, lon){
+    const query = buildOverpassQuery(lat, lon, SEARCH_RADIUS);
+    const form = new URLSearchParams();
+    form.set('data', query);
+
+    const res = await fetch(OVERPASS_ENDPOINT, {method:'POST', body:form});
+    if(!res.ok) throw new Error('Erro ao consultar Overpass: ' + res.status);
+    const json = await res.json();
+    const items = json.elements.map(el => {
+      // determine coordinate
+      const coord = el.type === 'node' ? {lat: el.lat, lon: el.lon} : (el.center ? {lat: el.center.lat, lon: el.center.lon} : null);
+      const name = el.tags && (el.tags.name || el.tags['operator'] || el.tags['brand']) || 'Academia sem nome';
+      const logo = el.tags && (el.tags.logo || el.tags.image) || null;
+      return {id: el.id, name, lat: coord?.lat, lon: coord?.lon, logo, tags: el.tags || {}};
+    }).filter(i => i.lat && i.lon);
+
+    return items;
+  }
+
+  function renderCard(place, userLat, userLon){
+    const row = document.getElementById('gyms-row');
+    const d = haversine(userLat, userLon, place.lat, place.lon);
+    const el = document.createElement('article');
+    el.className = 'card';
+
+    const logo = document.createElement('div');
+    logo.className = 'logo';
+    if(place.logo){
+      const img = document.createElement('img');
+      img.src = place.logo;
+      img.alt = place.name;
+      img.style.width = '100%'; img.style.height='100%'; img.style.objectFit='cover'; img.style.borderRadius='8px';
+      logo.textContent = '';
+      logo.appendChild(img);
+    } else {
+      // placeholder: initials
+      const initials = place.name.split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase();
+      logo.textContent = initials;
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<div class="name">${place.name}</div><div class="distance">${(d/1000).toFixed(2)} km — ${(Math.round(d))} m</div>`;
+
+    el.appendChild(logo);
+    el.appendChild(meta);
+    row.appendChild(el);
+  }
+
+  async function locateAndShow(){
+    const locInfo = document.getElementById('loc-info');
+    locInfo.textContent = 'Obtendo localização...';
+
+    // get location from browser; fallback to Jacareí
+    function useCoords(coords){
+      const lat = coords.latitude || coords.lat;
+      const lon = coords.longitude || coords.lon;
+      locInfo.textContent = `Latitude ${lat.toFixed(5)}, Longitude ${lon.toFixed(5)}`;
+      return fetchGyms(lat, lon).then(places => {
+        const row = document.getElementById('gyms-row'); row.innerHTML='';
+        if(places.length===0){ row.innerHTML = '<div class="muted">Nenhuma academia encontrada no raio definido.</div>'; return; }
+        // compute distance and sort
+        places.forEach(p => p.distance = haversine(lat, lon, p.lat, p.lon));
+        places.sort((a,b)=>a.distance-b.distance);
+        places.slice(0,20).forEach(p=>renderCard(p, lat, lon));
+      });
+    }
+
+    // try geolocation
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(async pos => {
+        try{ await useCoords(pos.coords); }
+        catch(err){ console.error(err); locInfo.textContent = 'Erro na busca — usando fallback.'; await useCoords(FALLBACK); }
+      }, async err => {
+        console.warn('Geolocation error', err); locInfo.textContent = 'Permissão negada ou indisponível — usando fallback.'; await useCoords(FALLBACK);
+      }, {enableHighAccuracy:true, timeout:8000});
+    } else {
+      locInfo.textContent = 'Geolocalização não suportada — usando fallback.';
+      await useCoords(FALLBACK);
+    }
+  }
+
+  document.getElementById('refresh').addEventListener('click', locateAndShow);
+  // inicializa
+  locateAndShow();
+
+  // ----- Observações / próximas etapas -----
+  // 1) Se quiser usar o Google Places (resultados mais ricos, logos, fotos e distância via API), crie uma conta no Google Cloud e ative Places API — veja a documentação: https://developers.google.com/maps/documentation/places/web-service/nearby-search
+  // 2) Para produção: trate limites de rate do Overpass e cacheie os resultados no seu backend. Se optar pelo Google Places, considere quotas e billing.
+  </script>
+</body>
+</html>
